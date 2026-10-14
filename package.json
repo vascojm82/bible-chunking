@@ -9,6 +9,7 @@
     "bible:audit": "tsx --import ./lib/env.js scripts/bible/audit.ts",
     "typecheck": "tsc --noEmit",
     "ts": "tsx --import ./lib/env.js",
+    "bible:fixed": "tsx --import ./lib/env.js scripts/bible/chunk-fixed.ts",
     "bible:chunk": "tsx --import ./lib/env.js scripts/bible/chunk.ts",
     "bible:upload": "tsx --import ./lib/env.js scripts/bible/upload.ts"
   },

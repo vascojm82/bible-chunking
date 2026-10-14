@@ -7,6 +7,8 @@
  * Chunks may cross chapter boundaries — chapter breaks are not always topic
  * breaks — but never cross a book, and a verse is never split, so every
  * chunk has an exact reference like "Genesis 1:1-5" or "Genesis 1:30-2:3".
+ * A passage closes after a verse that ends a sentence when one is close
+ * enough to the limit, since many KJV verses end mid-sentence at a comma.
  *
  * Usage:
  *   npm run bible:chunk
@@ -20,6 +22,7 @@ import { loadVerses, type Verse } from './parse';
 const MAX_CHARS = 1200;
 const OVERLAP_VERSES = 1; // each chunk repeats the last verse of the one before
 const MIN_TAIL_CHARS = 300; // a shorter leftover at the end of a book joins the previous chunk
+const MIN_CUT_CHARS = 600; // never close a passage early if that leaves it shorter than this
 const DEFAULT_OUT = 'data/bible/chunks-smart.jsonl';
 
 export type Chunk = {
@@ -55,6 +58,25 @@ function textOf(verses: Verse[]): string {
   return verses.map((v) => v.text).join(' ');
 }
 
+const SENTENCE_END = /[.!?][’'"”)]*$/;
+const CLAUSE_END = /[:;][’'"”)]*$/;
+
+/**
+ * Where to close a full passage: after the last verse that ends a sentence,
+ * else after the last that ends a clause (":" or ";"), else after the last
+ * verse. Only verses in the final `fresh` stretch qualify, so the passage
+ * always gains at least one new verse, and never before MIN_CUT_CHARS.
+ */
+function cutIndex(current: Verse[], fresh: number): number {
+  const candidates: number[] = [];
+  for (let cut = current.length; cut > current.length - fresh; cut--) {
+    if (textOf(current.slice(0, cut)).length < MIN_CUT_CHARS) break;
+    candidates.push(cut);
+  }
+  const endsWith = (re: RegExp) => candidates.find((cut) => re.test(current[cut - 1].text));
+  return endsWith(SENTENCE_END) ?? endsWith(CLAUSE_END) ?? current.length;
+}
+
 /** Greedily pack one book's verses into passages of up to MAX_CHARS */
 function packBook(verses: Verse[]): Verse[][] {
   const passages: Verse[][] = [];
@@ -62,10 +84,13 @@ function packBook(verses: Verse[]): Verse[][] {
   let fresh = 0; // verses in `current` that are not overlap from the previous passage
 
   for (const v of verses) {
-    if (fresh > 0 && textOf(current).length + 1 + v.text.length > MAX_CHARS) {
-      passages.push(current);
-      current = current.slice(-OVERLAP_VERSES);
-      fresh = 0;
+    while (fresh > 0 && textOf(current).length + 1 + v.text.length > MAX_CHARS) {
+      const cut = cutIndex(current, fresh);
+      passages.push(current.slice(0, cut));
+      // Verses after the cut move on to the next passage, behind the overlap
+      const carried = current.slice(cut);
+      current = [...current.slice(Math.max(0, cut - OVERLAP_VERSES), cut), ...carried];
+      fresh = carried.length;
     }
     current.push(v);
     fresh++;

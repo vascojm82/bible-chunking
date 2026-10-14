@@ -1,8 +1,8 @@
 /**
  * Uploader: embeds every chunk in a .jsonl file and upserts it into Qdrant.
  *
- * Each chunk becomes one point: id = chunk id, vector = embedding of
- * "<reference>: <text>", payload = the text plus all chunk metadata.
+ * Each chunk becomes one point: id = chunk id, vector = embedding of the
+ * chunk text, payload = the text plus all chunk metadata.
  * Upserting by id makes this safe to re-run — points are overwritten, not
  * duplicated.
  *
@@ -55,10 +55,10 @@ async function main() {
 
   for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
     const batch = chunks.slice(i, i + BATCH_SIZE);
-    // The reference goes into the embedded text so the vector knows where it is from
-    const vectors = await createEmbeddings(
-      batch.map((c) => `${c.metadata.reference}: ${c.text}`)
-    );
+    // Only the scripture text is embedded: the book filter in the search route
+    // covers book context, and verse numbers in the vector were mistaken for
+    // numbers in questions ("fourth day in Exodus" matched "Exodus 4:31").
+    const vectors = await createEmbeddings(batch.map((c) => c.text));
 
     await qdrant.upsert(BIBLE_COLLECTION, {
       wait: true,
