@@ -11,7 +11,8 @@
     "ts": "tsx --import ./lib/env.js",
     "bible:fixed": "tsx --import ./lib/env.js scripts/bible/chunk-fixed.ts",
     "bible:chunk": "tsx --import ./lib/env.js scripts/bible/chunk.ts",
-    "bible:upload": "tsx --import ./lib/env.js scripts/bible/upload.ts"
+    "bible:upload": "tsx --import ./lib/env.js scripts/bible/upload.ts",
+    "bible:context": "tsx --import ./lib/env.js scripts/bible/context.ts"
   },
   "repository": {
     "type": "git",

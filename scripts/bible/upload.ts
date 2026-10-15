@@ -2,13 +2,13 @@
  * Uploader: embeds every chunk in a .jsonl file and upserts it into Qdrant.
  *
  * Each chunk becomes one point: id = chunk id, vector = embedding of the
- * chunk text, payload = the text plus all chunk metadata.
- * Upserting by id makes this safe to re-run — points are overwritten, not
- * duplicated.
+ * chunk's context note followed by its text, payload = the text plus all
+ * chunk metadata (context included). Upserting by id makes this safe to
+ * re-run — points are overwritten, not duplicated.
  *
  * Usage:
  *   npm run bible:upload
- *   npm run bible:upload -- data/bible/chunks-smart.jsonl
+ *   npm run bible:upload -- <chunks.jsonl> [collection]
  */
 
 import * as fs from 'fs';
@@ -21,17 +21,17 @@ const BATCH_SIZE = 100; // chunks per embedding request and per upsert
 const FILTERABLE_FIELDS = ['book', 'testament'];
 
 /** Create the collection if it is missing, and make sure its payload indexes exist */
-async function ensureCollection() {
-  const { exists } = await qdrant.collectionExists(BIBLE_COLLECTION);
+async function ensureCollection(collection: string) {
+  const { exists } = await qdrant.collectionExists(collection);
   if (!exists) {
-    await qdrant.createCollection(BIBLE_COLLECTION, {
+    await qdrant.createCollection(collection, {
       vectors: { size: EMBEDDING_DIMENSIONS, distance: 'Cosine' },
     });
-    console.log(`Created collection "${BIBLE_COLLECTION}"`);
+    console.log(`Created collection "${collection}"`);
   }
   // Keyword indexes let searches filter by these fields ("only the New Testament")
   for (const field of FILTERABLE_FIELDS) {
-    await qdrant.createPayloadIndex(BIBLE_COLLECTION, {
+    await qdrant.createPayloadIndex(collection, {
       field_name: field,
       field_schema: 'keyword',
     });
@@ -40,8 +40,9 @@ async function ensureCollection() {
 
 async function main() {
   const path = process.argv[2] ?? DEFAULT_IN;
+  const collection = process.argv[3] ?? BIBLE_COLLECTION;
   if (!fs.existsSync(path)) {
-    console.error(`No chunks file at ${path} — run "npm run bible:chunk" first`);
+    console.error(`No chunks file at ${path} — run "npm run bible:chunk" then "npm run bible:context" first`);
     process.exit(1);
   }
 
@@ -51,16 +52,23 @@ async function main() {
     .filter(Boolean)
     .map((line) => JSON.parse(line));
 
-  await ensureCollection();
+  const missing = chunks.filter((c) => !c.metadata.context).length;
+  if (missing > 0) {
+    console.warn(`Warning: ${missing} chunks have no context and will be embedded as text only — run "npm run bible:context" first`);
+  }
+
+  await ensureCollection(collection);
 
   for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
     const batch = chunks.slice(i, i + BATCH_SIZE);
-    // Only the scripture text is embedded: the book filter in the search route
-    // covers book context, and verse numbers in the vector were mistaken for
-    // numbers in questions ("fourth day in Exodus" matched "Exodus 4:31").
-    const vectors = await createEmbeddings(batch.map((c) => c.text));
+    // The context note goes first: it names who and what in modern English,
+    // which is how questions are asked. Verse numbers stay out of the vector
+    // ("fourth day in Exodus" once matched "Exodus 4:31" because of them).
+    const vectors = await createEmbeddings(
+      batch.map((c) => (c.metadata.context ? `${c.metadata.context}\n\n${c.text}` : c.text))
+    );
 
-    await qdrant.upsert(BIBLE_COLLECTION, {
+    await qdrant.upsert(collection, {
       wait: true,
       points: batch.map((c, j) => ({
         id: c.id,
@@ -71,8 +79,8 @@ async function main() {
     console.log(`  uploaded ${Math.min(i + BATCH_SIZE, chunks.length)} / ${chunks.length}`);
   }
 
-  const { count } = await qdrant.count(BIBLE_COLLECTION, { exact: true });
-  console.log(`Done: "${BIBLE_COLLECTION}" now holds ${count} points`);
+  const { count } = await qdrant.count(collection, { exact: true });
+  console.log(`Done: "${collection}" now holds ${count} points`);
 }
 
 main();
